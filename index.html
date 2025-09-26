@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>QR 인식 · 8자리 검사</title>
+  <style>
+    :root{ --bg:#0b0f14; --fg:#f5f7fa; --muted:#9aa4b2; --accent:#4c9fff; --danger:#ff5566; --ok:#24d27e; --card:#11161d; --border:#1d2430; }
+    *{box-sizing:border-box}
+    body{margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,Malgun Gothic,Helvetica,Arial,sans-serif;}
+    header{padding:16px; text-align:center; border-bottom:1px solid var(--border); background:linear-gradient(180deg,#0d141d,#0b0f14); position:sticky; top:0; z-index:10;}
+    header h1{margin:0; font-size:18px; letter-spacing:.2px}
+    main{padding:16px; max-width:700px; margin:0 auto}
+    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.25);}
+    .preview{position:relative; aspect-ratio:9/16; width:100%; background:#000;}
+    video{width:100%; height:100%; object-fit:cover; display:block; background:#000;}
+    .overlay{position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center;}
+    .frame{width:70%; aspect-ratio:1/1; border:2px dashed rgba(255,255,255,.35); border-radius:12px; box-shadow:inset 0 0 0 9999px rgba(0,0,0,.25); backdrop-filter:blur(2px);}
+    .controls{display:flex; gap:12px; padding:12px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center; justify-content:center;}
+    button{flex:1 1 auto; min-width:120px; padding:14px 16px; border-radius:12px; border:1px solid var(--border); background:#131a23; color:var(--fg); font-size:16px; font-weight:600; cursor:pointer; transition:.15s ease; touch-action:manipulation;}
+    button:hover{transform:translateY(-1px)}
+    .on{background:var(--accent); color:#041423; border-color:transparent}
+    .off{background:#1b2330}
+    .muted{color:var(--muted); font-size:13px; text-align:center; padding:8px 12px 14px}
+    .row{display:flex; gap:12px; align-items:center; justify-content:center; padding:0 12px 12px; flex-wrap:wrap}
+    select{appearance:none; background:#0f141c; color:var(--fg); border:1px solid var(--border); border-radius:10px; padding:12px 14px; min-width:220px; font-size:14px; flex:1 1 220px;}
+    .chip{font-size:12px; color:var(--muted)}
+    .stat{padding:12px; border-top:1px solid var(--border); display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:center;}
+    .tag{padding:6px 10px; border-radius:999px; background:#0f1722; border:1px solid var(--border); font-size:12px; color:var(--muted)}
+    .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:1000;}
+    .modal{width:min(500px,90vw); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px 20px; box-shadow:0 20px 60px rgba(0,0,0,.5); animation:pop .15s ease-out; text-align:center;}
+    @keyframes pop{from{transform:scale(.96); opacity:0} to{transform:scale(1); opacity:1}}
+    .modal h3{margin:0 0 6px; font-size:18px}
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#0e1420; border:1px solid var(--border); border-radius:8px; padding:4px 8px;}
+    .yes{color:var(--ok)} .no{color:var(--danger)}
+    .modal .actions{display:flex; gap:10px; margin-top:14px} .modal .actions button{flex:1 1 auto}
+    .auto-close-hint{font-size:12px; color:var(--muted); text-align:right}
+    .hidden{display:none}
+    /* 새 모달 디자인 */
+    .student-id{font-size:22px; font-weight:800; margin:10px 0 14px; color:var(--accent);}
+    .student-id .kbd{font-size:24px; padding:6px 10px;}
+    .pay-status{font-size:32px; font-weight:900; margin:10px 0 6px;}
+    .pay-emoji{font-size:40px; line-height:1; margin-top:2px;}
+    @media (max-width:480px){header h1{font-size:16px} button{font-size:15px; padding:12px 14px} .pay-status{font-size:28px}}
+  </style>
+</head>
+<body>
+  <header><h1>QR 인식 → 앞 8자리 숫자 검사</h1></header>
+
+  <main>
+    <section class="card">
+      <div class="preview">
+        <video id="video" playsinline muted></video>
+        <div class="overlay"><div class="frame" aria-hidden="true"></div></div>
+      </div>
+
+      <div class="controls">
+        <button id="toggleBtn" class="off" type="button">카메라 켜기</button>
+        <button id="flashBtn" type="button" title="일부 기기만 지원" disabled>플래시</button>
+      </div>
+
+      <div class="row">
+        <select id="deviceSelect" title="PC에서는 0번 캠(첫 번째) 자동 선택">
+          <option value="">카메라 선택(자동)</option>
+        </select>
+        <span class="chip">모바일: 후면 카메라 우선</span>
+      </div>
+
+      <!-- 엑셀 관련 UI -->
+      <div class="row">
+        <button id="pickExcelBtn" type="button">엑셀 불러오기(로컬 · G열)</button>
+        <button id="dumpBtn" type="button">데이터 확인(콘솔)</button>
+        <button id="clearDataBtn" type="button" title="이 사이트의 로컬 저장·쿠키·캐시 삭제">쿠키/캐시 삭제</button>
+        <span id="excelStatus" class="chip">엑셀 미로딩</span>
+      </div>
+
+      <div class="stat">
+        <span class="tag" id="lastRaw">마지막 원본: -</span>
+        <span class="tag" id="lastTrim">앞 8자리: -</span>
+      </div>
+
+      <div id="diag" class="muted">https 환경에서 권한 허용 후 사용하세요.</div>
+    </section>
+  </main>
+
+  <!-- 새 모달: 원본 데이터(문자열) 표시는 제거, 학번+납부여부만 큼직하게 -->
+  <div id="backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <h3 id="modalTitle">확인 결과</h3>
+
+      <div class="student-id">
+        학번 🎓 <span id="modalFirst8" class="kbd">-</span>
+      </div>
+
+      <div class="pay-emoji" id="modalEmoji" aria-hidden="true">❌</div>
+      <div class="pay-status no" id="modalState">미납부</div>
+
+      <div class="actions"><button id="closeModal" type="button">닫기</button></div>
+      <div class="auto-close-hint" id="autoHint">2초 후 자동 닫힘</div>
+    </div>
+  </div>
+
+  <!-- jsQR (폴백) -->
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+  <!-- xlsx(SheetJS) : 로컬 파싱 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <script>
+  // ===================== 설정/상수 =====================
+  let TARGET_VALUES = [];                // 저장용 배열(디버그/표시용)
+  let TARGET_SET = new Set();            // 비교는 Set으로 (타입 문제 제거)
+  const DEBOUNCE_MS = 1200;
+  const STORAGE_KEY = 'qr_target_values_v1';
+  const STORAGE_META_KEY = 'qr_target_meta_v1';
+  // 개발 편의: 콘솔에서 window.__qrDebug.values / .set 으로 확인 가능
+  window.__qrDebug = { get values(){ return TARGET_VALUES }, get set(){ return TARGET_SET } };
+  // ====================================================
+
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const video = document.getElementById('video');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const deviceSelect = document.getElementById('deviceSelect');
+  const flashBtn = document.getElementById('flashBtn');
+  const lastRawEl = document.getElementById('lastRaw');
+  const lastTrimEl = document.getElementById('lastTrim');
+  const diag = document.getElementById('diag');
+
+  const backdrop = document.getElementById('backdrop');
+  const modalFirst8 = document.getElementById('modalFirst8');
+  const modalState = document.getElementById('modalState');
+  const modalEmoji = document.getElementById('modalEmoji');
+  const closeModalBtn = document.getElementById('closeModal');
+  const autoHint = document.getElementById('autoHint');
+
+  const pickExcelBtn = document.getElementById('pickExcelBtn');
+  const clearDataBtn = document.getElementById('clearDataBtn');
+  const dumpBtn = document.getElementById('dumpBtn');
+  const excelStatus = document.getElementById('excelStatus');
+
+  const excelInput = document.createElement('input');
+  excelInput.type = 'file';
+  excelInput.accept = '.xlsx,.xls';
+  excelInput.style.display = 'none';
+  document.body.appendChild(excelInput);
+
+  let stream = null, scanning = false, scanLoopId = null;
+  let lastShown = { value: null, time: 0 };
+  let autoCloseTimer = null, trackForTorch = null;
+
+  const barcodeDetectorSupported = ('BarcodeDetector' in window);
+  const detector = barcodeDetectorSupported ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
+
+  function logDiag(msg){ console.log(msg); if(diag) diag.textContent = String(msg); }
+
+  // ---------- 숫자 정규화 & 8자리 변환 ----------
+  function normalizeDigits(input){
+    let s = String(input ?? '');
+    s = s.replace(/[\uFF10-\uFF19]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFF10+0x30)); // 전각
+    s = s.replace(/[\u0660-\u0669]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x0660+0x30)); // Arabic-Indic
+    s = s.replace(/[\u06F0-\u06F9]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x06F0+0x30)); // Ext Arabic-Indic
+    return s;
+  }
+  function first8FromCell(cell){
+    if (typeof cell === 'number' && Number.isFinite(cell)) {
+      const digits = Math.trunc(cell).toString();
+      return digits.padStart(8, '0').slice(0, 8);
+    }
+    const s = normalizeDigits(cell);
+    const digits = s.replace(/\D/g, '');
+    if (digits.length >= 8) return digits.slice(0, 8);
+    if (digits.length > 0)  return digits.padStart(8, '0');
+    return '';
+  }
+  function extractFirst8Digits(str){
+    const s = normalizeDigits(str);
+    const digits = s.replace(/\D/g,'');
+    return digits.slice(0,8);
+  }
+
+  // ---------- Local persistence ----------
+  function saveTargetValuesToStorage(values, meta = {}) {
+    try {
+      const coerced = values
+        .map(v => String(v ?? ''))
+        .map(s => s.replace(/\D/g, '').slice(0, 8))
+        .map(s => (s.length === 8 ? s : s.padStart(8, '0')))
+        .filter(s => s.length === 8);
+
+      const uniq = Array.from(new Set(coerced));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(uniq));
+      localStorage.setItem(
+        STORAGE_META_KEY,
+        JSON.stringify({ ...meta, count: uniq.length, savedAt: new Date().toISOString() })
+      );
+
+      TARGET_VALUES = uniq;
+      TARGET_SET = new Set(uniq);
+      excelStatus.textContent = `엑셀 로딩 완료 · ${uniq.length}건`;
+      console.log('[SAVE] TARGET_VALUES length =', uniq.length, 'sample =', uniq.slice(0, 10));
+    } catch (e) {
+      alert('로컬 저장에 실패했습니다(용량/권한 확인).'); console.error(e);
+    }
+  }
+
+  function loadTargetValuesFromStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const metaRaw = localStorage.getItem(STORAGE_META_KEY);
+      if (!raw) {
+        excelStatus.textContent = '엑셀 미로딩';
+        TARGET_VALUES = []; TARGET_SET = new Set();
+        console.log('[LOAD] no saved data');
+        return;
+      }
+
+      const arr = JSON.parse(raw) || [];
+      const fixed = arr
+        .map(v => String(v ?? ''))
+        .map(s => s.replace(/\D/g, '').padStart(8, '0').slice(0, 8))
+        .filter(s => s.length === 8);
+
+      TARGET_VALUES = fixed;
+      TARGET_SET = new Set(fixed);
+
+      const meta = metaRaw ? JSON.parse(metaRaw) : {};
+      excelStatus.textContent = meta.fileName
+        ? `저장값 사용(${meta.fileName}) · ${fixed.length}건`
+        : `저장값 사용 · ${fixed.length}건`;
+
+      console.log('[LOAD] TARGET_VALUES length =', fixed.length, 'sample =', fixed.slice(0, 10));
+    } catch (e) {
+      console.warn('저장값 복원 실패', e);
+      excelStatus.textContent = '저장값 복원 실패';
+      TARGET_VALUES = []; TARGET_SET = new Set();
+    }
+  }
+
+  async function clearSiteData(){
+    try{
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_META_KEY);
+
+      const cookies = document.cookie.split(';');
+      for(const c of cookies){
+        const eq = c.indexOf('=');
+        const name = (eq>-1 ? c.substr(0,eq) : c).trim();
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+        const parts = location.hostname.split('.');
+        for(let i=0;i<parts.length-1;i++){
+          const domain='.'+parts.slice(i).join('.');
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${domain}`;
+        }
+      }
+      if('caches' in window){ const keys = await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); }
+      if('serviceWorker' in navigator){ const regs=await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); }
+
+      TARGET_VALUES=[]; TARGET_SET=new Set();
+      excelStatus.textContent='사이트 데이터 삭제 완료 · 엑셀 미로딩';
+      logDiag('사이트 데이터(로컬 저장/쿠키/캐시/SW) 삭제 완료');
+      alert('쿠키/캐시/로컬 저장을 삭제했습니다.');
+    }catch(e){ console.error(e); alert('사이트 데이터 삭제 중 오류가 발생했습니다.'); }
+  }
+
+  // ---------- Excel(G열) 로딩 (시트 자동탐색 + G열 직접읽기) ----------
+  async function loadExcelFromFile(file){
+    if(!file){ excelStatus.textContent='엑셀 선택 취소'; return; }
+    try{
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+
+      // 1) 모든 시트를 돌면서 "G열에서 뽑힌 건수"가 가장 많은 시트를 선택
+      function readGFromSheet(ws){
+        const out = [];
+        const ref = ws['!ref'];
+        if(!ref) return out;
+
+        const range = XLSX.utils.decode_range(ref); // {s:{r,c}, e:{r,c}}
+        // G열(0-based 6)만 순회
+        const G = 6;
+        for(let r = range.s.r; r <= range.e.r; r++){
+          const addr = XLSX.utils.encode_cell({ r, c: G }); // "G{row}"
+          const cell = ws[addr]?.v; // 원시 값
+          const f8 = first8FromCell(cell);
+          if(f8) out.push(f8);
+        }
+        return out;
+      }
+
+      const sheetStats = wb.SheetNames.map(name=>{
+        const ws = wb.Sheets[name];
+        const vals = readGFromSheet(ws);
+        return { name, count: vals.length, vals };
+      });
+
+      // 건수가 가장 큰 시트 선택
+      sheetStats.sort((a,b)=> b.count - a.count);
+      const best = sheetStats[0];
+      console.log('[EXCEL] 시트별 G열 건수:', sheetStats.map(s=>({name:s.name, count:s.count})));
+
+      if(!best || best.count === 0){
+        excelStatus.textContent = 'G열에서 유효한 8자리가 없습니다';
+        console.warn('[EXCEL] 모든 시트에서 G열 추출 0건');
+        saveTargetValuesToStorage([], { fileName: file.name, sheet: best?.name || '(none)' });
+        return;
+      }
+
+      // 2) 최적 시트의 값 저장
+      saveTargetValuesToStorage(best.vals, { fileName: file.name, sheet: best.name });
+      console.log('[EXCEL] 선택 시트:', best.name, '건수:', best.count, '예시:', best.vals.slice(0,10));
+
+    }catch(err){
+      excelStatus.textContent = '엑셀 로딩 실패';
+      console.error('엑셀 파싱 에러:', err);
+      alert('엑셀을 읽는 중 오류가 발생했습니다.');
+    }finally{
+      excelInput.value = '';
+    }
+  }
+
+  // ---------- UI 바인딩 ----------
+  pickExcelBtn.addEventListener('click', ()=> excelInput.click());
+  excelInput.addEventListener('change', (e)=> loadExcelFromFile(e.target.files?.[0]));
+  clearDataBtn.addEventListener('click', clearSiteData);
+  dumpBtn.addEventListener('click', ()=> {
+    console.log('[DUMP] TARGET_VALUES length =', TARGET_VALUES.length, 'sample =', TARGET_VALUES.slice(0, 20));
+    console.log('[DUMP] TARGET_SET size =', TARGET_SET.size);
+  });
+
+  // ---------- Camera ----------
+  async function listCameras(){
+    try{
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d=>d.kind==='videoinput');
+      deviceSelect.innerHTML = '<option value="">카메라 선택(자동)</option>';
+      cams.forEach((cam,idx)=>{
+        const opt = document.createElement('option');
+        opt.value = cam.deviceId;
+        opt.textContent = cam.label || `카메라 ${idx+1}`;
+        deviceSelect.appendChild(opt);
+      });
+    }catch(e){ /* 권한 전에는 label이 비어있을 수 있음 */ }
+  }
+  function getPreferredConstraints(){
+    if(isMobile){
+      return { video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} }, audio:false };
+    }
+    const selected = deviceSelect.value;
+    if(selected){
+      return { video: { deviceId: { exact: selected }, width:{ideal:1280}, height:{ideal:720} }, audio:false };
+    }
+    return { video: true, audio:false };
+  }
+  async function startCamera(){
+    if(stream) await stopCamera();
+    try{
+      try{
+        if (navigator.permissions && navigator.permissions.query){
+          const perm = await navigator.permissions.query({ name: 'camera' });
+          logDiag(`카메라 권한 상태: ${perm.state}`);
+        }
+      }catch(_){}
+
+      await listCameras();
+
+      if(!isMobile && !deviceSelect.value){
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d=>d.kind==='videoinput');
+        if(cams.length>0) deviceSelect.value = cams[0].deviceId;
+      }
+
+      const constraints = getPreferredConstraints();
+      logDiag(`요청 제약: ${JSON.stringify(constraints)}`);
+
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
+
+      trackForTorch = stream.getVideoTracks()[0] || null;
+      const cap = trackForTorch?.getCapabilities?.() || {};
+      flashBtn.disabled = !cap.torch;
+
+      scanning = true;
+      toggleBtn.textContent = '카메라 끄기';
+      toggleBtn.classList.remove('off'); toggleBtn.classList.add('on');
+
+      logDiag('카메라 시작 성공');
+      runScanLoop();
+    }catch(err){
+      let tip = '';
+      switch(err?.name){
+        case 'NotAllowedError': tip='권한이 거부되었습니다. 브라우저 설정에서 카메라 허용 후 다시 시도하세요.'; break;
+        case 'NotFoundError': tip='카메라 장치를 찾지 못했습니다. 다른 앱 점유 여부 확인.'; break;
+        case 'OverconstrainedError': tip=`제약 충돌: ${err?.constraint}`; break;
+        default: tip='알 수 없는 오류';
+      }
+      logDiag(`시작 실패: ${err?.name || err} / ${tip}`);
+      alert(`카메라를 시작할 수 없습니다.\n\n${err?.name || err}\n${tip}`);
+      await stopCamera();
+    }
+  }
+  async function stopCamera(){
+    scanning = false;
+    if(scanLoopId) cancelAnimationFrame(scanLoopId);
+    scanLoopId = null;
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+      stream = null;
+    }
+    toggleBtn.textContent = '카메라 켜기';
+    toggleBtn.classList.remove('on'); toggleBtn.classList.add('off');
+  }
+  toggleBtn.addEventListener('click', ()=>{ if(scanning) stopCamera(); else startCamera(); });
+  deviceSelect.addEventListener('change', ()=>{ if(scanning) startCamera(); });
+
+  // 플래시
+  let torchOn = false;
+  flashBtn.addEventListener('click', async ()=>{
+    if(!trackForTorch) return;
+    const cap = trackForTorch.getCapabilities?.() || {};
+    if(!cap.torch) return;
+    torchOn = !torchOn;
+    try{
+      await trackForTorch.applyConstraints({ advanced: [{ torch: torchOn }] });
+      flashBtn.textContent = torchOn ? '플래시 끄기' : '플래시 켜기';
+    }catch(e){ console.warn('Torch error', e); }
+  });
+
+  // 스캔 루프 (BarcodeDetector → jsQR 폴백)
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  async function runScanLoop(){
+    const step = async ()=>{
+      if(!scanning || video.readyState < 2){ scanLoopId = requestAnimationFrame(step); return; }
+      try{
+        const vw = video.videoWidth, vh = video.videoHeight;
+        canvas.width = vw; canvas.height = vh;
+        ctx.drawImage(video, 0, 0, vw, vh);
+
+        let raw = null;
+
+        if(detector){
+          try{
+            const bmp = await createImageBitmap(canvas);
+            const codes = await detector.detect(bmp);
+            bmp.close?.();
+            if(codes && codes.length) raw = codes[0].rawValue || '';
+          }catch(_){ /* 폴백 */ }
+        }
+
+        if(!raw){
+          if(typeof jsQR === 'function'){
+            const imageData = ctx.getImageData(0, 0, vw, vh);
+            const result = jsQR(imageData.data, vw, vh, { inversionAttempts: 'dontInvert' });
+            if(result && result.data) raw = result.data;
+          }else{
+            const now = performance.now();
+            if(now - lastShown.time > 1000 && backdrop.style.display !== 'flex'){
+              showModal('jsQR 로딩 실패(네트워크/차단 확인).', '', false, true);
+              lastShown.time = now;
+            }
+          }
+        }
+
+        if(raw){ handleCode(raw); }
+      }catch(e){ console.warn('detect error', e); }
+
+      await new Promise(r=>setTimeout(r, 150));
+      scanLoopId = requestAnimationFrame(step);
+    };
+    scanLoopId = requestAnimationFrame(step);
+  }
+
+  function handleCode(raw){
+    // 원본 로그(필터링 없음)
+    console.log('QR 인식(raw):', raw);
+
+    const now = performance.now();
+    if(lastShown.value === raw && (now - lastShown.time) < DEBOUNCE_MS) return;
+
+    const first8 = extractFirst8Digits(raw);
+    lastRawEl.textContent = '마지막 원본: ' + (raw || '-');
+    lastTrimEl.textContent = '앞 8자리: ' + (first8 || '-');
+
+    const exists = first8 && TARGET_SET.has(first8);
+
+    if (!exists) {
+      console.log('[MISS] first8 =', first8, '| setSize =', TARGET_SET.size, '| sample =', TARGET_VALUES.slice(0,10));
+    } else {
+      console.log('[HIT] first8 =', first8);
+    }
+
+    showModal(raw, first8, !!exists);
+    lastShown = { value: raw, time: now };
+  }
+
+  // 새 모달 로직: 학번 + 납부여부만 표시(이모지 포함)
+  function showModal(raw, first8, exists, infoOnly=false){
+    modalFirst8.textContent = first8 ? first8 : '-';
+
+    if(infoOnly){
+      modalEmoji.textContent = 'ℹ️';
+      modalState.textContent = '정보';
+      modalState.classList.remove('yes'); modalState.classList.add('no');
+    }else{
+      if(exists){
+        modalEmoji.textContent = '✅';
+        modalState.textContent = '납부 완료';
+        modalState.classList.remove('no'); modalState.classList.add('yes');
+      }else{
+        modalEmoji.textContent = '❌';
+        modalState.textContent = '미납부';
+        modalState.classList.remove('yes'); modalState.classList.add('no');
+      }
+    }
+
+    backdrop.style.display = 'flex';
+
+    clearTimeout(autoCloseTimer);
+    autoHint.textContent = '2초 후 자동 닫힘';
+    let start = Date.now();
+    const tick = ()=>{
+      const remain = 2000 - (Date.now() - start);
+      if(remain <= 0) { closeModal(); return; }
+      autoHint.textContent = Math.ceil(remain/1000) + '초 후 자동 닫힘';
+      autoCloseTimer = setTimeout(tick, 200);
+    };
+    autoCloseTimer = setTimeout(tick, 200);
+  }
+  function closeModal(){ clearTimeout(autoCloseTimer); backdrop.style.display = 'none'; }
+  closeModalBtn.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeModal(); });
+
+  // 초기 상태
+  if(!('mediaDevices' in navigator) || !('getUserMedia' in navigator.mediaDevices)){
+    alert('이 브라우저는 카메라 사용을 지원하지 않습니다.');
+  }else{
+    loadTargetValuesFromStorage(); // 저장된 엑셀 목록 복원
+    listCameras();                 // 권한 전에는 label이 빈 값일 수 있음
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ if(scanning) stopCamera(); }});
+  </script>
+</body>
+</html>
